@@ -62,12 +62,12 @@ struct MainTabView: View {
         .tint(AppColors.accent)
         .onAppear {
             if appState.activeSessionKey == nil {
-                appState.startNewChat()
+                appState.resumeOrStartChat()
             }
         }
         .onChange(of: appState.selectedAgent?.id) {
             if appState.activeSessionKey == nil {
-                appState.startNewChat()
+                appState.resumeOrStartChat()
             }
         }
     }

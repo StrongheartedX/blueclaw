@@ -10,7 +10,7 @@ struct AgentPickerView: View {
             ForEach(appState.agents) { agent in
                 Button {
                     appState.selectedAgent = agent
-                    appState.startNewChat()
+                    appState.resumeOrStartChat()
                 } label: {
                     HStack {
                         Text(agent.displayName)

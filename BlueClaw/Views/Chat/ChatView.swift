@@ -1,7 +1,16 @@
 import SwiftUI
 
 struct ChatView: View {
+    @Environment(AppState.self) private var appState
     @Bindable var viewModel: ChatViewModel
+
+    /// Resolve the agent for this chat from the session key (format: `agent:<id>:<suffix>`)
+    private var agent: Agent? {
+        let parts = viewModel.sessionKey.split(separator: ":")
+        guard parts.count >= 2, parts[0] == "agent" else { return nil }
+        let agentId = String(parts[1])
+        return appState.agents.first { $0.id == agentId }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -10,8 +19,12 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 16) {
                         ForEach(viewModel.messages) { message in
-                            MessageBubbleView(message: message)
-                                .id(message.id)
+                            MessageBubbleView(
+                                message: message,
+                                agentEmoji: agent?.emoji,
+                                agentName: agent?.name
+                            )
+                            .id(message.id)
                         }
 
                         // Streaming message
@@ -22,7 +35,9 @@ struct ChatView: View {
                                     role: .assistant,
                                     content: viewModel.streamingContent
                                 ),
-                                isStreaming: true
+                                isStreaming: true,
+                                agentEmoji: agent?.emoji,
+                                agentName: agent?.name
                             )
                             .id("streaming")
                         }

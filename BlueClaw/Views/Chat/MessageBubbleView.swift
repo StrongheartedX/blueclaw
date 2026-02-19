@@ -3,6 +3,8 @@ import SwiftUI
 struct MessageBubbleView: View {
     let message: ChatMessage
     var isStreaming = false
+    var agentEmoji: String?
+    var agentName: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -14,9 +16,14 @@ struct MessageBubbleView: View {
                 // Role label
                 if message.role == .assistant {
                     HStack(spacing: 4) {
-                        Image(systemName: "cpu")
-                            .font(.system(size: 10))
-                        Text("Assistant")
+                        if let emoji = agentEmoji {
+                            Text(emoji)
+                                .font(.system(size: 10))
+                        } else {
+                            Image(systemName: "cpu")
+                                .font(.system(size: 10))
+                        }
+                        Text(agentName ?? "Assistant")
                             .font(.caption2)
                             .fontWeight(.medium)
                     }

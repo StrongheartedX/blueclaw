@@ -469,6 +469,17 @@ final class AppState {
         return vm
     }
 
+    func resumeOrStartChat() {
+        guard let agent = selectedAgent else { return }
+        let prefix = "agent:\(agent.id):"
+        // Find the most recent session for this agent
+        if let existing = sessions.first(where: { $0.key.hasPrefix(prefix) }) {
+            activeSessionKey = existing.key
+            return
+        }
+        startNewChat()
+    }
+
     func startNewChat() {
         guard let agent = selectedAgent else { return }
         let deviceName = UIDevice.current.name
