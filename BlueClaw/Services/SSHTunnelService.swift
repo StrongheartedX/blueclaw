@@ -48,7 +48,7 @@ actor SSHTunnelService {
 
         do {
             // Build host key validator (TOFU)
-            log.error("Connecting SSH to \(host, privacy: .public):\(port) as \(username, privacy: .public)")
+            log.info("Connecting SSH to \(host, privacy: .public):\(port) as \(username, privacy: .public)")
             let validator = TOFUValidator(hostname: host)
 
             let settings = SSHClientSettings(
@@ -60,23 +60,23 @@ actor SSHTunnelService {
                 hostKeyValidator: .custom(validator)
             )
 
-            log.error("Initiating SSH connection...")
+            log.info("Initiating SSH connection...")
             let client = try await SSHClient.connect(to: settings)
             self.sshClient = client
-            log.error("SSH connected successfully")
+            log.info("SSH connected successfully")
 
             // Start local TCP relay
             let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
             self.eventLoopGroup = group
 
-            log.error("Starting local TCP relay for remote port \(remotePort)...")
+            log.info("Starting local TCP relay for remote port \(remotePort)...")
             let localPort = try await startLocalRelay(
                 group: group,
                 sshClient: client,
                 remoteHost: "localhost",
                 remotePort: remotePort
             )
-            log.error("Local relay listening on 127.0.0.1:\(localPort)")
+            log.info("Local relay listening on 127.0.0.1:\(localPort)")
 
             state = .connected(localPort: localPort)
 
@@ -236,7 +236,7 @@ private final class SSHForwardHandler: ChannelInboundHandler, @unchecked Sendabl
 
     func channelActive(context: ChannelHandlerContext) {
         self.localChannel = context.channel
-        log.error("Local TCP connection accepted, opening SSH directTCPIP to \(self.remoteHost, privacy: .public):\(self.remotePort)")
+        log.info("Local TCP connection accepted, opening SSH directTCPIP to \(self.remoteHost, privacy: .public):\(self.remotePort)")
 
         // Open a directTCPIP channel through SSH
         let originatorAddress: SocketAddress
@@ -244,6 +244,7 @@ private final class SSHForwardHandler: ChannelInboundHandler, @unchecked Sendabl
             originatorAddress = try SocketAddress(ipAddress: "127.0.0.1", port: 0)
         } catch {
             log.error("Failed to create originator address")
+
             context.close(promise: nil)
             return
         }
@@ -261,7 +262,7 @@ private final class SSHForwardHandler: ChannelInboundHandler, @unchecked Sendabl
         Task { [weak self] in
             guard let self else { return }
             do {
-                log.error("Creating directTCPIP channel...")
+                log.info("Creating directTCPIP channel...")
                 let sshChan = try await self.sshClient.createDirectTCPIPChannel(
                     using: settings
                 ) { channel in
@@ -270,7 +271,7 @@ private final class SSHForwardHandler: ChannelInboundHandler, @unchecked Sendabl
                 }
                 self.sshChannel = sshChan
                 self.sshChannelReady = true
-                log.error("DirectTCPIP channel established, flushing \(self.pendingWrites.count) buffered writes")
+                log.info("DirectTCPIP channel established, flushing \(self.pendingWrites.count) buffered writes")
 
                 // Flush any buffered writes
                 for buffer in self.pendingWrites {
@@ -289,11 +290,11 @@ private final class SSHForwardHandler: ChannelInboundHandler, @unchecked Sendabl
         let buffer = self.unwrapInboundIn(data)
 
         if sshChannelReady, let sshChannel {
-            log.error("Local->SSH: \(buffer.readableBytes) bytes")
+            log.debug("Local->SSH: \(buffer.readableBytes) bytes")
             sshChannel.writeAndFlush(buffer, promise: nil)
         } else {
             // SSH channel not ready yet — buffer the data
-            log.error("Local->SSH: buffering \(buffer.readableBytes) bytes (SSH channel not ready)")
+            log.debug("Local->SSH: buffering \(buffer.readableBytes) bytes (SSH channel not ready)")
             pendingWrites.append(buffer)
         }
     }
@@ -325,12 +326,12 @@ private final class SSHToLocalRelayHandler: ChannelInboundHandler, @unchecked Se
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         // Data came from the SSH side → forward to local TCP
         let buffer = self.unwrapInboundIn(data)
-        log.error("SSH->Local: \(buffer.readableBytes) bytes")
+        log.debug("SSH->Local: \(buffer.readableBytes) bytes")
         localChannel.writeAndFlush(buffer, promise: nil)
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        log.error("SSH channel became inactive")
+        log.info("SSH channel became inactive")
         localChannel.close(promise: nil)
     }
 
