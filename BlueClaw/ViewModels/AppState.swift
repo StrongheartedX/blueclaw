@@ -22,6 +22,10 @@ final class AppState {
     // Health
     var isHealthy = false
 
+    // Usage
+    var usageData: UsageData?
+    var isLoadingUsage = false
+
     // Reconnection
     private(set) var isReconnecting = false
 
@@ -30,6 +34,9 @@ final class AppState {
 
     // Chat view models keyed by session key
     var chatViewModels: [String: ChatViewModel] = [:]
+
+    // Voice
+    private var _voiceViewModel: VoiceViewModel?
 
     // Internal
     let client = GatewayClient()
@@ -44,6 +51,7 @@ final class AppState {
     // Health monitor internals
     private var healthCheckTask: Task<Void, Never>?
     private var consecutiveHealthFailures = 0
+    private var usageRefreshTask: Task<Void, Never>?
 
     // Saved connection params for reconnection
     private var lastToken: String = ""
@@ -181,6 +189,7 @@ final class AppState {
     func disconnect() async {
         stopReconnectLoop()
         stopHealthCheckLoop()
+        stopUsageRefresh()
         eventTask?.cancel()
         eventTask = nil
         healthTask?.cancel()
@@ -194,6 +203,9 @@ final class AppState {
         selectedAgent = nil
         activeSessionKey = nil
         chatViewModels = [:]
+        _voiceViewModel?.stop()
+        _voiceViewModel = nil
+        usageData = nil
     }
 
     // MARK: - Reconnection
@@ -397,6 +409,51 @@ final class AppState {
         }
     }
 
+    // MARK: - Voice
+
+    @MainActor
+    func voiceViewModel() -> VoiceViewModel {
+        if let existing = _voiceViewModel {
+            return existing
+        }
+        let vm = VoiceViewModel(client: client, sessionKeyProvider: { [weak self] in
+            self?.activeSessionKey
+        })
+        _voiceViewModel = vm
+        return vm
+    }
+
+    // MARK: - Usage
+
+    func loadUsage() async {
+        isLoadingUsage = true
+        do {
+            usageData = try await client.fetchUsage()
+        } catch {
+            log.error("Failed to load usage: \(String(describing: error), privacy: .public)")
+        }
+        isLoadingUsage = false
+    }
+
+    func startUsageRefresh() {
+        stopUsageRefresh()
+        usageRefreshTask = Task {
+            while !Task.isCancelled {
+                await loadUsage()
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    break
+                }
+            }
+        }
+    }
+
+    func stopUsageRefresh() {
+        usageRefreshTask?.cancel()
+        usageRefreshTask = nil
+    }
+
     // MARK: - Session Management
 
     func selectSession(key: String) {
@@ -414,8 +471,15 @@ final class AppState {
 
     func startNewChat() {
         guard let agent = selectedAgent else { return }
-        let suffix = UUID().uuidString.prefix(8).lowercased()
-        let key = agent.sessionKey(suffix: String(suffix))
+        let deviceName = UIDevice.current.name
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMdd-HHmmss"
+        let timestamp = formatter.string(from: Date())
+        let suffix = "\(deviceName)-\(timestamp)"
+        let key = agent.sessionKey(suffix: suffix)
         activeSessionKey = key
     }
 
@@ -446,8 +510,16 @@ final class AppState {
         case "chat":
             guard let dict = frame.payloadDictionary() else { return }
             let chatEvent = ChatEventPayload(from: dict)
-            if let vm = chatViewModels[chatEvent.sessionKey] {
-                vm.handleChatEvent(chatEvent)
+            let eventKey = chatEvent.sessionKey
+
+            // Always route to the matching chat VM
+            if let chatVM = chatViewModels[eventKey] {
+                chatVM.handleChatEvent(chatEvent)
+            }
+
+            // Also route to voice VM if it's waiting for a response on this session
+            if let voiceVM = _voiceViewModel, voiceVM.isWaiting, eventKey == activeSessionKey {
+                voiceVM.handleChatEvent(chatEvent)
             }
 
         case "health":

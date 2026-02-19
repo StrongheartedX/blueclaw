@@ -14,6 +14,7 @@ nonisolated enum GatewayMethod {
     static let modelsList = "models.list"
     static let status = "status"
     static let configGet = "config.get"
+    static let usageCost = "usage.cost"
 }
 
 nonisolated struct SessionResolveParams: Codable, Sendable {

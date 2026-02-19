@@ -24,6 +24,15 @@ struct MessageBubbleView: View {
                     .padding(.leading, 4)
                 }
 
+                // Image thumbnail
+                if let imageData = message.imageData, let uiImage = UIImage(data: imageData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: 200, maxHeight: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
                 // Message content
                 if isStreaming {
                     Text(message.content + "▊")
@@ -34,6 +43,9 @@ struct MessageBubbleView: View {
                         .padding(.vertical, 10)
                         .background(bubbleColor)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
+                } else if message.imageData != nil && message.content == "\u{1F4F7} Image" {
+                    // Image-only message, skip the text bubble
+                    EmptyView()
                 } else {
                     MarkdownTextView(content: message.content, isUser: message.role == .user)
                         .padding(.horizontal, 14)

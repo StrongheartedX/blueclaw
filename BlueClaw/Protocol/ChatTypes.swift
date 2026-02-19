@@ -11,12 +11,14 @@ nonisolated struct ChatMessage: Identifiable, Sendable {
     let role: MessageRole
     var content: String
     let timestamp: Date
+    let imageData: Data?
 
-    init(id: String = UUID().uuidString, role: MessageRole, content: String, timestamp: Date = Date()) {
+    init(id: String = UUID().uuidString, role: MessageRole, content: String, timestamp: Date = Date(), imageData: Data? = nil) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
+        self.imageData = imageData
     }
 }
 
@@ -77,12 +79,19 @@ nonisolated enum ChatStreamState: String, Sendable {
     case error
 }
 
+nonisolated struct ChatSendAttachment: Codable, Sendable {
+    let type: String
+    let mimeType: String
+    let content: String // base64-encoded data
+}
+
 nonisolated struct ChatSendParams: Codable, Sendable {
     let sessionKey: String
     let message: String
     let idempotencyKey: String
     let thinking: String?
     let timeoutMs: Int?
+    let attachments: [ChatSendAttachment]?
 }
 
 nonisolated struct ChatHistoryParams: Codable, Sendable {

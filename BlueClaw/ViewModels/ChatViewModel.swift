@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @Observable
 final class ChatViewModel {
@@ -12,6 +13,7 @@ final class ChatViewModel {
     var inputText: String = ""
     var isLoadingHistory = false
     var error: String?
+    var pendingImage: UIImage?
 
     init(sessionKey: String, client: GatewayClient) {
         self.sessionKey = sessionKey
@@ -41,19 +43,40 @@ final class ChatViewModel {
 
     // MARK: - Send
 
+    func attachImage(_ image: UIImage) {
+        pendingImage = image
+    }
+
+    func clearAttachment() {
+        pendingImage = nil
+    }
+
     func send() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isStreaming else { return }
+        let image = pendingImage
+        guard !text.isEmpty || image != nil, !isStreaming else { return }
 
-        let userMessage = ChatMessage(role: .user, content: text)
+        // Build attachments from pending image
+        var attachments: [ChatSendAttachment]?
+        var thumbnailData: Data?
+        if let image {
+            let (compressed, mimeType) = ImageCompressor.compress(image)
+            thumbnailData = compressed
+            attachments = [ChatSendAttachment(type: "image", mimeType: mimeType, content: compressed.base64EncodedString())]
+        }
+
+        let displayText = text.isEmpty ? "\u{1F4F7} Image" : text
+        let userMessage = ChatMessage(role: .user, content: displayText, imageData: thumbnailData)
         messages.append(userMessage)
         inputText = ""
+        pendingImage = nil
         isStreaming = true
         streamingContent = ""
         error = nil
 
         do {
-            try await client.sendMessage(sessionKey: sessionKey, message: text)
+            let message = text.isEmpty ? "Describe this image." : text
+            try await client.sendMessage(sessionKey: sessionKey, message: message, attachments: attachments)
         } catch {
             isStreaming = false
             self.error = error.localizedDescription

@@ -92,13 +92,14 @@ actor GatewayClient {
 
     // MARK: - Chat
 
-    func sendMessage(sessionKey: String, message: String, thinking: String? = "low", timeoutMs: Int? = 30000) async throws {
+    func sendMessage(sessionKey: String, message: String, thinking: String? = "low", timeoutMs: Int? = 30000, attachments: [ChatSendAttachment]? = nil) async throws {
         let params = ChatSendParams(
             sessionKey: sessionKey,
             message: message,
             idempotencyKey: UUID().uuidString,
             thinking: thinking,
-            timeoutMs: timeoutMs
+            timeoutMs: timeoutMs,
+            attachments: attachments
         )
         let response = try await service.send(method: GatewayMethod.chatSend, params: params)
         guard response.ok == true else {
@@ -144,6 +145,19 @@ actor GatewayClient {
             throw BlueClawError.serverError(code: response.error?.code, message: response.error?.message)
         }
         return response.payloadDictionary() ?? [:]
+    }
+
+    // MARK: - Usage
+
+    func fetchUsage() async throws -> UsageData {
+        let response = try await service.send(method: GatewayMethod.usageCost)
+        guard response.ok == true else {
+            throw BlueClawError.serverError(code: response.error?.code, message: response.error?.message)
+        }
+        guard let payload = response.payloadDictionary() else {
+            throw BlueClawError.missingPayload
+        }
+        return UsageData(from: payload)
     }
 
     // MARK: - Health

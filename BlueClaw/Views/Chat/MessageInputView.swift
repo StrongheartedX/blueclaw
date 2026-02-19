@@ -1,15 +1,50 @@
 import SwiftUI
+import PhotosUI
 
 struct MessageInputView: View {
     @Bindable var viewModel: ChatViewModel
     @FocusState private var isFocused: Bool
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showCamera = false
+    @State private var showPhotoPicker = false
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
                 .background(AppColors.surfaceBorder)
 
+            // Attachment preview
+            if let image = viewModel.pendingImage {
+                HStack {
+                    AttachmentPreviewView(image: image) {
+                        viewModel.clearAttachment()
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
+                // Attachment menu
+                Menu {
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
+                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                    }
+
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("Camera", systemImage: "camera")
+                    }
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(AppColors.accent)
+                }
+
                 // Text input
                 TextField("Message", text: $viewModel.inputText, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -28,6 +63,12 @@ struct MessageInputView: View {
                     .onSubmit {
                         Task { await viewModel.send() }
                     }
+
+                // Voice-to-text
+                VoiceButton { text in
+                    viewModel.inputText = text
+                    Task { await viewModel.send() }
+                }
 
                 // Send / Abort button
                 if viewModel.isStreaming {
@@ -53,9 +94,28 @@ struct MessageInputView: View {
             .padding(.vertical, 10)
             .background(AppColors.surface)
         }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .onChange(of: selectedPhotoItem) {
+            guard let item = selectedPhotoItem else { return }
+            selectedPhotoItem = nil
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    viewModel.attachImage(image)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPickerView { image in
+                viewModel.attachImage(image)
+            }
+            .ignoresSafeArea()
+        }
     }
 
     private var canSend: Bool {
-        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !viewModel.isStreaming
+        let hasText = !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasImage = viewModel.pendingImage != nil
+        return (hasText || hasImage) && !viewModel.isStreaming
     }
 }

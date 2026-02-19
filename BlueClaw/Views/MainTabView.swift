@@ -27,15 +27,31 @@ struct MainTabView: View {
                 }
             }
 
-            Tab("Sessions", systemImage: "list.bullet", value: 1) {
+            Tab("Voice", systemImage: "waveform", value: 1) {
                 NavigationStack {
-                    SessionListView(switchToChat: { selectedTab = 0 })
+                    VoiceView()
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .principal) {
+                                Text(chatTitle)
+                                    .font(.headline)
+                            }
+                            ToolbarItem(placement: .topBarTrailing) {
+                                AgentPickerView()
+                            }
+                        }
+                }
+            }
+
+            Tab("Sessions", systemImage: "list.bullet", value: 2) {
+                NavigationStack {
+                    SessionListView(switchToChat: { selectedTab = 0 })  // Tab 0 = Chat
                         .navigationTitle("Sessions")
                         .navigationBarTitleDisplayMode(.inline)
                 }
             }
 
-            Tab("Settings", systemImage: "gearshape.fill", value: 2) {
+            Tab("Settings", systemImage: "gearshape.fill", value: 3) {
                 NavigationStack {
                     SettingsView()
                         .navigationTitle("Settings")
@@ -45,7 +61,11 @@ struct MainTabView: View {
         }
         .tint(AppColors.accent)
         .onAppear {
-            // Start a default chat session if we have an agent
+            if appState.activeSessionKey == nil {
+                appState.startNewChat()
+            }
+        }
+        .onChange(of: appState.selectedAgent?.id) {
             if appState.activeSessionKey == nil {
                 appState.startNewChat()
             }
@@ -143,6 +163,8 @@ struct SettingsView: View {
                 }
             }
 
+            UsageSectionView()
+
             // SSH Public Key section — always available if a key exists
             if SSHKeyManager.hasKey, let pubKey = SSHKeyManager.publicKeyOpenSSH() {
                 Section {
@@ -192,6 +214,12 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(AppColors.background)
+        .onAppear {
+            appState.startUsageRefresh()
+        }
+        .onDisappear {
+            appState.stopUsageRefresh()
+        }
     }
 }
 
