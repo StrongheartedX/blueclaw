@@ -9,21 +9,27 @@ BlueClaw is a native iOS client for [OpenClaw](https://github.com/priceconsultin
 ## Features
 
 - **Chat with AI agents** -- Full conversation interface with markdown rendering and multiple agent support
+- **Voice mode** -- Hands-free voice input with automatic transcription and send
 - **Session management** -- View, switch between, and manage active gateway sessions
 - **Secure SSH tunneling** -- Connect to gateways behind firewalls via Ed25519 SSH key authentication with TOFU host key verification
 - **Direct WebSocket** -- Connect directly to gateways with automatic TLS upgrade for non-local connections
 - **QR code setup** -- Scan a QR code from your gateway to configure the connection instantly
 - **Biometric authentication** -- Protect saved credentials with Face ID or Touch ID
 - **Device identity** -- Ed25519 keypair stored in the iOS Keychain for cryptographic device authentication
+- **Content scanning** -- On-device regex scanning for API keys, secrets, and PII in outgoing messages with send-gate warnings
+- **Security audit** -- Real-time security posture scoring covering transport encryption, gateway health, credential storage, and data leak prevention
+- **Usage tracking** -- Token and cost tracking per session and all-time
 
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/connect.png" width="250" alt="Connect">
+  <img src="screenshots/connect.png" width="200" alt="Connect">
   &nbsp;
-  <img src="screenshots/chat.png" width="250" alt="Chat">
+  <img src="screenshots/chat.png" width="200" alt="Chat">
   &nbsp;
-  <img src="screenshots/settings.png" width="250" alt="Settings">
+  <img src="screenshots/settings.png" width="200" alt="Settings">
+  &nbsp;
+  <img src="screenshots/audit.png" width="200" alt="Security Audit">
 </p>
 
 ## Requirements
