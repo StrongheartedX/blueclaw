@@ -50,6 +50,10 @@ BlueClaw/
   Theme/          # Color definitions
 ```
 
+## Vibe Coded
+
+Built with [Claude Code](https://claude.ai/claude-code) by an experienced developer. AI-assisted doesn't mean unsupervised -- every architectural decision, security boundary, and protocol detail was directed by a human who knows what they're doing.
+
 ## License
 
 Private -- all rights reserved.
