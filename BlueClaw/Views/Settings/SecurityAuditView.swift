@@ -5,6 +5,7 @@ struct SecurityAuditView: View {
     @State private var report: AuditReport?
     @State private var isScanning = false
     @State private var scanProgress: Double = 0
+    @State private var latestVersion: String?
 
     var body: some View {
         Group {
@@ -34,6 +35,11 @@ struct SecurityAuditView: View {
         .onAppear {
             if report == nil {
                 report = SecurityAuditor.loadLastReport()
+            }
+        }
+        .task {
+            if latestVersion == nil {
+                latestVersion = await SecurityAuditor.fetchLatestVersion()
             }
         }
     }
@@ -103,31 +109,9 @@ struct SecurityAuditView: View {
         List {
             // Score card
             Section {
-                SecurityScoreCardView(report: report)
+                SecurityScoreCardView(report: report, latestVersion: latestVersion)
             }
             .listRowBackground(AppColors.surface)
-
-            // Severity summary
-            Section("Summary") {
-                ForEach(AuditSeverity.allCases, id: \.self) { severity in
-                    let count = report.count(for: severity)
-                    if count > 0 {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(severity.color)
-                                .frame(width: 8, height: 8)
-                            Text(severity.displayName)
-                                .font(.subheadline)
-                                .foregroundStyle(AppColors.textPrimary)
-                            Spacer()
-                            Text("\(count)")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(AppColors.textSecondary)
-                        }
-                    }
-                }
-            }
 
             // Findings grouped by category
             ForEach(report.groupedByCategory, id: \.0) { category, findings in
@@ -141,10 +125,28 @@ struct SecurityAuditView: View {
             // Metadata
             Section {
                 HStack {
-                    Text("Gateway")
+                    Text("Gateway Version")
                     Spacer()
-                    Text(report.gatewayVersion)
-                        .foregroundStyle(AppColors.textSecondary)
+                    if report.gatewayVersion == "Unknown" {
+                        Text("Unknown")
+                            .foregroundStyle(AppColors.textMuted)
+                    } else if report.gatewayVersion.lowercased() == "dev" || report.gatewayVersion.lowercased().hasPrefix("dev") {
+                        Text("dev (built from source)")
+                            .fontWeight(.medium)
+                            .foregroundStyle(.green)
+                    } else {
+                        Text(report.gatewayVersion)
+                            .fontWeight(.medium)
+                            .foregroundStyle(gatewayVersionColor(report.gatewayVersion))
+                    }
+                }
+                if let latest = latestVersion {
+                    HStack {
+                        Text("Latest Gateway Release")
+                        Spacer()
+                        Text(latest)
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
                 }
                 HStack {
                     Text("Scanned")
@@ -157,6 +159,20 @@ struct SecurityAuditView: View {
             }
         }
         .scrollContentBackground(.hidden)
+    }
+
+    private func gatewayVersionColor(_ version: String) -> Color {
+        if version == "Unknown" {
+            return AppColors.textMuted
+        }
+        // Dev builds are assumed current (built from source, likely ahead of latest release)
+        if version.lowercased() == "dev" || version.lowercased().hasPrefix("dev") {
+            return .green
+        }
+        guard let latest = latestVersion else {
+            return AppColors.textSecondary
+        }
+        return SecurityAuditor.isVersionCurrent(version, latest: latest) ? .green : .red
     }
 
     // MARK: - Scan

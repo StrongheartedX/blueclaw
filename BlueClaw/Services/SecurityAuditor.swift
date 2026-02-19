@@ -16,23 +16,19 @@ final class SecurityAuditor {
         var findings: [AuditFinding] = []
         var gatewayVersion = "Unknown"
 
-        // Phase 1: Health check
-        progress(0.1)
-        if let healthFindings = await auditHealth(&gatewayVersion) {
-            findings.append(contentsOf: healthFindings)
-        }
+        progress(0.2)
+        let (gatewayFinding, version) = await auditGateway()
+        findings.append(gatewayFinding)
+        gatewayVersion = version
 
-        // Phase 2: Connection security
         progress(0.4)
-        findings.append(contentsOf: auditConnection())
+        findings.append(auditTransport())
 
-        // Phase 3: Prompt defense
-        progress(0.7)
-        findings.append(contentsOf: auditPromptDefense())
+        progress(0.6)
+        findings.append(auditDataProtection())
 
-        // Phase 4: App-level security
-        progress(0.9)
-        findings.append(contentsOf: auditAppSecurity())
+        progress(0.8)
+        findings.append(auditCredentials())
 
         progress(1.0)
 
@@ -41,158 +37,225 @@ final class SecurityAuditor {
         return report
     }
 
-    // MARK: - Phase 1: Health
+    // MARK: - Gateway
 
-    private func auditHealth(_ version: inout String) async -> [AuditFinding]? {
+    private func auditGateway() async -> (AuditFinding, String) {
+        var version = "Unknown"
+
+        if let ver = await client.serverVersion {
+            version = ver
+        } else if let ver = await client.fetchServerVersion() {
+            version = ver
+        }
+
         do {
             let healthy = try await client.healthCheck()
             if healthy {
-                return [AuditFinding(
+                return (AuditFinding(
                     category: "Gateway",
                     title: "Gateway Responding",
-                    description: "The gateway health endpoint is reachable and responding normally.",
-                    severity: .info,
+                    description: "The gateway is reachable and healthy.",
+                    severity: .pass,
                     recommendation: "No action needed."
-                )]
+                ), version)
             } else {
-                return [AuditFinding(
+                return (AuditFinding(
                     category: "Gateway",
-                    title: "Gateway Health Check Failed",
-                    description: "The gateway health endpoint returned an unhealthy status.",
+                    title: "Gateway Unhealthy",
+                    description: "The gateway responded but reported an unhealthy status.",
                     severity: .high,
-                    recommendation: "Check gateway logs and ensure all services are running correctly."
-                )]
+                    recommendation: "Check gateway logs and restart if needed."
+                ), version)
             }
         } catch {
-            return [AuditFinding(
+            return (AuditFinding(
                 category: "Gateway",
                 title: "Gateway Unreachable",
-                description: "Could not reach the gateway health endpoint: \(error.localizedDescription)",
+                description: "Could not reach the gateway: \(error.localizedDescription)",
                 severity: .critical,
-                recommendation: "Verify the gateway is running and network connectivity is available."
-            )]
+                recommendation: "Verify the gateway is running and your network connection is active."
+            ), version)
         }
     }
 
-    // MARK: - Phase 2: Connection Security
+    // MARK: - Transport Encryption
 
-    private func auditConnection() -> [AuditFinding] {
-        var findings: [AuditFinding] = []
+    private func auditTransport() -> AuditFinding {
         let url = hostname.lowercased()
-
+        let hasSSHTunnel = !sshHost.isEmpty
         let isLocalhost = url.contains("127.0.0.1") || url.contains("localhost") || url.contains("[::1]")
+        let isEncryptedScheme = url.hasPrefix("wss://") || url.hasPrefix("https://")
 
-        if url.hasPrefix("ws://") || url.hasPrefix("http://") {
-            if isLocalhost {
-                findings.append(AuditFinding(
-                    category: "Transport",
-                    title: "Unencrypted Local Connection",
-                    description: "Using unencrypted WebSocket (ws://) over localhost. This is acceptable for local development via SSH tunnel.",
-                    severity: .info,
-                    recommendation: "This is expected when using SSH tunneling. No action needed."
-                ))
-            } else {
-                findings.append(AuditFinding(
-                    category: "Transport",
-                    title: "Unencrypted Remote Connection",
-                    description: "Using unencrypted WebSocket (ws://) to a remote host. Data is transmitted in plaintext.",
-                    severity: .critical,
-                    recommendation: "Switch to wss:// (WebSocket Secure) or use SSH tunneling to encrypt the connection."
-                ))
+        // Check if the path to the gateway traverses Tailscale.
+        // Must check both hostname AND sshHost — when SSH tunneling, the
+        // .ts.net address is in sshHost while hostname is localhost.
+        let tailscaleActive = Self.detectTailscale()
+        let hostOnTailscale = url.contains(".ts.net") || Self.isTailscaleIP(url)
+        let sshOnTailscale = hasSSHTunnel && (sshHost.lowercased().contains(".ts.net") || Self.isTailscaleIP(sshHost.lowercased()))
+        let viaTailscale = tailscaleActive && (hostOnTailscale || sshOnTailscale)
+
+        // Collect all encryption layers protecting the traffic
+        var layers: [String] = []
+        if isEncryptedScheme { layers.append("TLS") }
+        if hasSSHTunnel { layers.append("SSH tunnel to \(sshHost)") }
+        if viaTailscale { layers.append("Tailscale WireGuard") }
+
+        if !layers.isEmpty {
+            let desc: String
+            switch layers.count {
+            case 1: desc = "Traffic is encrypted via \(layers[0])."
+            case 2: desc = "Traffic is encrypted via \(layers[0]) and \(layers[1])."
+            default: desc = "Traffic is encrypted via \(layers.dropLast().joined(separator: ", ")), and \(layers.last!)."
             }
-        } else if url.hasPrefix("wss://") || url.hasPrefix("https://") {
-            findings.append(AuditFinding(
+            return AuditFinding(
                 category: "Transport",
-                title: "Encrypted Connection",
-                description: "Using encrypted WebSocket (wss://) for secure communication.",
-                severity: .info,
-                recommendation: "No action needed. Connection is encrypted."
-            ))
+                title: "Encrypted",
+                description: desc,
+                severity: .pass,
+                recommendation: "No action needed."
+            )
         }
 
-        if !sshHost.isEmpty {
-            findings.append(AuditFinding(
+        if isLocalhost {
+            return AuditFinding(
                 category: "Transport",
-                title: "SSH Tunnel Active",
-                description: "Connection is secured through an SSH tunnel to \(sshHost).",
+                title: "Local Only",
+                description: "Using unencrypted WebSocket over localhost. Traffic stays on-device.",
                 severity: .info,
-                recommendation: "SSH tunneling provides strong encryption. No action needed."
-            ))
+                recommendation: "Acceptable if the gateway runs locally. For remote gateways, use wss:// or SSH tunneling."
+            )
         }
 
-        return findings
+        return AuditFinding(
+            category: "Transport",
+            title: "Not Encrypted",
+            description: "Traffic to the gateway is unencrypted. Messages, tokens, and API keys are sent in plaintext.",
+            severity: .critical,
+            recommendation: "Switch to wss://, use SSH tunneling, or connect via Tailscale."
+        )
     }
 
-    // MARK: - Phase 3: Content Scanning
+    // MARK: - Data Protection
 
-    private func auditPromptDefense() -> [AuditFinding] {
+    private func auditDataProtection() -> AuditFinding {
         if ContentScanner.isEnabled {
-            return [AuditFinding(
-                category: "Content Scanning",
-                title: "Content Scanning Active",
-                description: "Real-time on-device content scanning is enabled. Outgoing messages are checked for API keys, secrets, and PII before reaching the gateway. All scanning runs locally on this device.",
-                severity: .info,
-                recommendation: "No action needed. Content scanning can be toggled in Settings."
-            )]
-        } else {
-            return [AuditFinding(
-                category: "Content Scanning",
-                title: "Content Scanning Disabled",
-                description: "On-device content scanning is currently disabled. Outgoing messages are not checked for sensitive data before sending.",
+            return AuditFinding(
+                category: "Data Protection",
+                title: "Content Scanning Enabled",
+                description: "Outgoing messages are scanned for API keys, secrets, and PII before sending.",
+                severity: .pass,
+                recommendation: "No action needed."
+            )
+        }
+        return AuditFinding(
+            category: "Data Protection",
+            title: "Content Scanning Disabled",
+            description: "Outgoing messages are not scanned for sensitive data.",
+            severity: .low,
+            recommendation: "Enable in Settings to scan for API keys and PII before sending."
+        )
+    }
+
+    // MARK: - Credential Storage
+
+    private func auditCredentials() -> AuditFinding {
+        if UserDefaults.standard.string(forKey: "blueclaw.token") != nil {
+            return AuditFinding(
+                category: "Credentials",
+                title: "Token in UserDefaults",
+                description: "Authentication token is stored in UserDefaults, which is not encrypted at rest.",
                 severity: .medium,
-                recommendation: "Enable content scanning in Settings to detect API keys, secrets, and PII before they are sent."
-            )]
+                recommendation: "Migrate to the iOS Keychain for hardware-backed encryption."
+            )
+        }
+        return AuditFinding(
+            category: "Credentials",
+            title: "Token in Keychain",
+            description: "Authentication token is stored in the iOS Keychain with hardware-backed encryption.",
+            severity: .pass,
+            recommendation: "No action needed."
+        )
+    }
+
+    // MARK: - Tailscale Detection
+
+    /// Detects whether Tailscale is active by checking for a utun interface
+    /// with a Tailscale CGNAT IP (100.64.0.0/10).
+    static func detectTailscale() -> Bool {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0 else { return false }
+        defer { freeifaddrs(ifaddr) }
+
+        var current = ifaddr
+        while let addr = current {
+            let name = String(cString: addr.pointee.ifa_name)
+            if name.hasPrefix("utun"), let sa = addr.pointee.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET) {
+                var sin = sockaddr_in()
+                memcpy(&sin, sa, MemoryLayout<sockaddr_in>.size)
+                let ip = sin.sin_addr.s_addr
+                let byte0 = ip & 0xFF
+                let byte1 = (ip >> 8) & 0xFF
+                if byte0 == 100 && (byte1 & 0xC0) == 64 {
+                    return true
+                }
+            }
+            current = addr.pointee.ifa_next
+        }
+        return false
+    }
+
+    private static func isTailscaleIP(_ host: String) -> Bool {
+        let pattern = #"100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}"#
+        return host.range(of: pattern, options: .regularExpression) != nil
+    }
+
+    // MARK: - Latest Version Lookup
+
+    private static let tagsURL = URL(string: "https://api.github.com/repos/openclaw/openclaw/tags?per_page=30")!
+
+    nonisolated static func fetchLatestVersion() async -> String? {
+        do {
+            var request = URLRequest(url: tagsURL)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 10
+            let (data, _) = try await URLSession.shared.data(for: request)
+            guard let tags = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                return nil
+            }
+            let stablePattern = try NSRegularExpression(pattern: #"^v\d+\.\d+\.\d+$"#)
+            for tag in tags {
+                guard let name = tag["name"] as? String else { continue }
+                let range = NSRange(name.startIndex..., in: name)
+                if stablePattern.firstMatch(in: name, range: range) != nil {
+                    return name
+                }
+            }
+            return nil
+        } catch {
+            return nil
         }
     }
 
-    // MARK: - Phase 4: App Security
+    /// Compare calver version strings (vYYYY.M.D). Returns true if `running` >= `latest`.
+    nonisolated static func isVersionCurrent(_ running: String, latest: String) -> Bool {
+        let r = parseVersion(running)
+        let l = parseVersion(latest)
+        if r.major != l.major { return r.major > l.major }
+        if r.minor != l.minor { return r.minor > l.minor }
+        return r.patch >= l.patch
+    }
 
-    private func auditAppSecurity() -> [AuditFinding] {
-        var findings: [AuditFinding] = []
-
-        // Check if token is stored securely
-        if UserDefaults.standard.string(forKey: "blueclaw.hostname") != nil {
-            // Hostname in UserDefaults is fine, but check if token might be there too
-            if UserDefaults.standard.string(forKey: "blueclaw.token") != nil {
-                findings.append(AuditFinding(
-                    category: "App Security",
-                    title: "Token in UserDefaults",
-                    description: "Authentication token is stored in UserDefaults, which is not encrypted at rest.",
-                    severity: .medium,
-                    recommendation: "Migrate token storage to the iOS Keychain for encrypted storage."
-                ))
-            } else {
-                findings.append(AuditFinding(
-                    category: "App Security",
-                    title: "Token Stored in Keychain",
-                    description: "Authentication token is stored in the iOS Keychain, which provides hardware-backed encryption.",
-                    severity: .info,
-                    recommendation: "No action needed. Keychain is the recommended storage for secrets."
-                ))
-            }
+    private nonisolated static func parseVersion(_ version: String) -> (major: Int, minor: Int, patch: Int) {
+        var cleaned = version.trimmingCharacters(in: CharacterSet.letters.union(.whitespaces))
+        if let dashIndex = cleaned.firstIndex(of: "-") {
+            cleaned = String(cleaned[cleaned.startIndex..<dashIndex])
         }
-
-        // SSH key check
-        if SSHKeyManager.hasKey {
-            findings.append(AuditFinding(
-                category: "App Security",
-                title: "SSH Key Pair Present",
-                description: "An SSH key pair is stored in the Keychain for device authentication and tunnel establishment.",
-                severity: .info,
-                recommendation: "Ensure the corresponding public key is only added to authorized_keys on trusted hosts."
-            ))
-        }
-
-        // ATS exception check
-        findings.append(AuditFinding(
-            category: "App Security",
-            title: "Local Network Exception",
-            description: "App Transport Security allows local network connections for SSH tunnel communication.",
-            severity: .low,
-            recommendation: "This is required for SSH tunneling. Ensure ATS is enforced for all non-local connections."
-        ))
-
-        return findings
+        let parts = cleaned.split(separator: ".").compactMap { Int($0) }
+        return (
+            major: parts.count > 0 ? parts[0] : 0,
+            minor: parts.count > 1 ? parts[1] : 0,
+            patch: parts.count > 2 ? parts[2] : 0
+        )
     }
 
     // MARK: - Persistence

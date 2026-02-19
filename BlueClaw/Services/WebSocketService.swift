@@ -10,6 +10,7 @@ actor WebSocketService: NSObject {
     private var sessionDelegate: WebSocketSessionDelegate?
 
     private(set) var state: ConnectionState = .disconnected
+    private(set) var serverVersion: String?
     private var connectingURL: String = ""
     private var challengeNonce: String?
     private var challengeContinuation: CheckedContinuation<String, any Error>?
@@ -96,6 +97,11 @@ actor WebSocketService: NSObject {
                 let errMsg = response.error?.message ?? "Connection rejected"
                 state = .error(errMsg)
                 throw BlueClawError.connectionFailed(errMsg)
+            }
+
+            // Extract server version from connect response
+            if let hello = try? response.decodePayload(as: HelloOkPayload.self) {
+                serverVersion = hello.server?.version
             }
 
             state = .connected

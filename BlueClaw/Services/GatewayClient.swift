@@ -17,6 +17,10 @@ actor GatewayClient {
         }
     }
 
+    var serverVersion: String? {
+        get async { await service.serverVersion }
+    }
+
     func connect(hostname: String, token: String, displayName: String = "BlueClaw iOS") async throws {
         try await service.connect(hostname: hostname, token: token, displayName: displayName)
     }
@@ -165,5 +169,44 @@ actor GatewayClient {
     func healthCheck() async throws -> Bool {
         let response = try await service.send(method: GatewayMethod.health)
         return response.ok == true
+    }
+
+    // MARK: - Status / Version
+
+    func fetchStatus() async throws -> [String: Any] {
+        let response = try await service.send(method: GatewayMethod.status)
+        guard response.ok == true else {
+            throw BlueClawError.serverError(code: response.error?.code, message: response.error?.message)
+        }
+        return response.payloadDictionary() ?? [:]
+    }
+
+    /// Attempts to resolve the gateway server version from available endpoints.
+    /// Tries status, then config, then health — returns the first version found.
+    func fetchServerVersion() async -> String? {
+        // Try status endpoint — may have top-level "version" or nested "server.version"
+        if let status = try? await fetchStatus() {
+            if let v = status["version"] as? String { return v }
+            if let server = status["server"] as? [String: Any],
+               let v = server["version"] as? String { return v }
+        }
+
+        // Try config endpoint
+        if let config = try? await getConfig() {
+            if let v = config["version"] as? String { return v }
+            if let v = config["gatewayVersion"] as? String { return v }
+            if let server = config["server"] as? [String: Any],
+               let v = server["version"] as? String { return v }
+        }
+
+        // Try health endpoint payload
+        if let response = try? await service.send(method: GatewayMethod.health),
+           let payload = response.payloadDictionary() {
+            if let v = payload["version"] as? String { return v }
+            if let server = payload["server"] as? [String: Any],
+               let v = server["version"] as? String { return v }
+        }
+
+        return nil
     }
 }

@@ -2,6 +2,9 @@ import SwiftUI
 
 struct SecurityScoreCardView: View {
     let report: AuditReport
+    var latestVersion: String?
+
+    private var score: Int { report.overallScore(latestVersion: latestVersion) }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -12,13 +15,13 @@ struct SecurityScoreCardView: View {
                     .frame(width: 100, height: 100)
 
                 Circle()
-                    .trim(from: 0, to: CGFloat(report.overallScore) / 100)
-                    .stroke(report.scoreColor, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .trim(from: 0, to: CGFloat(score) / 100)
+                    .stroke(report.scoreColor(latestVersion: latestVersion), style: StrokeStyle(lineWidth: 8, lineCap: .round))
                     .frame(width: 100, height: 100)
                     .rotationEffect(.degrees(-90))
 
                 VStack(spacing: 0) {
-                    Text("\(report.overallScore)")
+                    Text("\(score)")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(AppColors.textPrimary)
                     Text("/ 100")
@@ -27,13 +30,21 @@ struct SecurityScoreCardView: View {
                 }
             }
 
-            Text(report.scoreLabel)
+            Text(report.scoreLabel(latestVersion: latestVersion))
                 .font(.headline)
-                .foregroundStyle(report.scoreColor)
+                .foregroundStyle(report.scoreColor(latestVersion: latestVersion))
 
-            Text("\(report.findings.count) findings")
-                .font(.caption)
-                .foregroundStyle(AppColors.textMuted)
+            let passCount = report.count(for: .pass)
+            let issueCount = report.findings.count - passCount - report.count(for: .info)
+            if issueCount > 0 {
+                Text("\(passCount) passed, \(issueCount) \(issueCount == 1 ? "issue" : "issues")")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.textMuted)
+            } else {
+                Text("\(passCount) checks passed")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.textMuted)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
