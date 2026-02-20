@@ -67,6 +67,13 @@ struct VoiceView: View {
                         }
                     }
                 }
+                .onChange(of: vm.streamingContent) {
+                    if !vm.streamingContent.isEmpty {
+                        withAnimation {
+                            proxy.scrollTo("streaming", anchor: .bottom)
+                        }
+                    }
+                }
             }
 
             Spacer(minLength: 0)

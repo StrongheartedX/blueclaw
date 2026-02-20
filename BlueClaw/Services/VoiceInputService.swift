@@ -220,6 +220,10 @@ final class VoiceInputService {
     }
 
     func stopSpeaking() {
+        // Clear delegate before stopping so didCancel doesn't fire the completion handler
+        // (which would restart recording in continuous mode)
+        synthesizer.delegate = nil
+        ttsDelegate = nil
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
